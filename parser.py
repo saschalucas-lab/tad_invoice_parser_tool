@@ -425,18 +425,23 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         if candidates:
             customer = candidates[0]
 
-    # Betrag:
-    # robust gegen "1 653.92" und gegen gespreiztes PDF-Textformat
+    # Betrag robuster erkennen
     amount_patterns = [
-        r"ZU\s*ZAHLEN\s*([0-9]+\.[0-9]{2})\s*EUR",
-        r"BETRAG\s*o\.?\s*MwST\.?\s*([0-9]+\.[0-9]{2})",
-        r"FÄLLIG\s*\d{2}/\d{2}/\d{2}\s*([0-9]+\.[0-9]{2})",
+        r"ZU\s*ZAHLEN\s*([0-9\s]+\.\d{2})",
+        r"ZU\s*ZAHLEN\s*([0-9\s\.]+,\d{2})",
+        r"BETRAG\s*o\.?\s*MwST\.?\s*([0-9\s]+\.\d{2})",
+        r"BETRAG\s*o\.?\s*MwST\.?\s*([0-9\s\.]+,\d{2})",
+        r"FÄLLIG\s*\d{2}/\d{2}/\d{2}\s*([0-9\s]+\.\d{2})",
     ]
 
     for pattern in amount_patterns:
-        m_amount = re.search(pattern, compact_text, re.IGNORECASE)
+        m_amount = re.search(pattern, text, re.IGNORECASE)
         if m_amount:
-            amount = normalize_amount(m_amount.group(1))
+            raw = m_amount.group(1)
+            raw = raw.replace(" ", "")
+            if "," in raw:
+                raw = raw.replace(".", "")
+            amount = normalize_amount(raw)
             if amount is not None:
                 break
 
