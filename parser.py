@@ -173,20 +173,38 @@ def parse_french_albion_wholesale(text: str, lines, brand: str, issuer: str) -> 
     customer = ""
     amount = None
 
+    # Rechnungsnummer
     m = re.search(r"N°\s*(F-\d+)", text)
     if m:
         invoice_number = m.group(1)
 
+    # Datum
     m = re.search(r"DATE\s*:\s*(\d{2}-\d{2}-\d{4})", text)
     if m:
         date = normalize_date(m.group(1))
 
-    customer = first_valid_line_after(
-        lines,
-        lambda line: "PAYMENT DATE" in line.upper(),
-        max_offset=6
+    # Kunde:
+    # Block direkt nach PAYMENT DATE bis Taxe / B2B... / REF. / Devis n°
+    customer_block_match = re.search(
+        r"PAYMENT DATE\s*:\s*[^\n]+\n(.*?)(?:\nTaxe\s*:|\nB2B[A-Z0-9_]+|\nREF\.|\nDevis n°)",
+        text,
+        re.IGNORECASE | re.DOTALL
     )
 
+    if customer_block_match:
+        customer_block = customer_block_match.group(1).strip()
+        block_lines = [clean_value(x) for x in customer_block.splitlines() if clean_value(x)]
+
+        if block_lines:
+            # erste Zeile im Empfängerblock = Kundenname
+            customer = block_lines[0]
+
+    # harter Schutz: Rechnungssteller darf nie als Kunde landen
+    if customer:
+        if customer.strip().lower() in ["sas french albion", "french albion"]:
+            customer = ""
+
+    # Betrag
     for line in lines:
         if "BALANCE DUE" in line.upper():
             m = re.search(r"([0-9\s]+,\d{2})", line)
@@ -265,23 +283,26 @@ def parse_kaotiko(text: str, lines, brand: str, issuer: str) -> dict:
     if m:
         date = normalize_date(m.group(1))
 
-    # Kunde:
-    # In deinem Parsed Text steht:
-    # "Cliente/Customer:"
-    # "Teléfono: 933882070 Fax: MULLUS"
-    # deshalb nehmen wir EXAKT den Text nach Fax:
+    # Kunde bei KAOTIKO: Text nach Fax:
     m = re.search(r"Fax:\s*([A-Z][A-Z\s&.\-]+)", text)
     if m:
         customer = clean_value(m.group(1))
 
-    # Harter Schutz
     if customer:
         if customer.upper().startswith("CL/") or re.search(r"\d", customer):
             customer = ""
 
-    # Betrag:
-    # Nur Werte mit genau 2 Dezimalstellen akzeptieren
-    # und bevorzugt T.Invoice
+    if not customer:
+        for line in lines:
+            if "Fax:" in line:
+                candidate = line.split("Fax:", 1)[-1].strip()
+                candidate = clean_value(candidate)
+
+                if not re.search(r"\d", candidate) and not candidate.upper().startswith("CL/"):
+                    customer = candidate
+                    break
+
+    # Betrag
     m = re.search(r"T\.Invoice\s*\(€\)\s*:\s*([0-9]+,\d{2})", text, re.IGNORECASE)
     if m:
         amount = normalize_amount(m.group(1))
@@ -381,6 +402,13 @@ def extract_invoice_data(pdf_path: str) -> dict:
         data = parse_kaotiko(text, lines, brand, issuer)
     else:
         data = parse_generic(text, lines, brand, issuer)
+
+    # Harter Schutz für French Albion:
+    # Kundenname darf nicht gleich Rechnungssteller sein
+    if data.get("Rechnungssteller") == "French Albion":
+        kundenname = str(data.get("Kundenname", "")).strip().lower()
+        if kundenname in ["sas french albion", "french albion"]:
+            data["Kundenname"] = ""
 
     # Harter Schutz für KAOTIKO
     if data.get("Rechnungssteller") == "Kaotiko":
