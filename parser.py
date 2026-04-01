@@ -352,8 +352,6 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
     amount = None
 
     # Rechnungsnummer + Datum
-    # Beispiel:
-    # RECHNUNG - ORIGINAL No 53165703 Vom 18/03/26
     m = re.search(
         r"RECHNUNG\s*-\s*ORIGINAL\s*No\s*(\d+)\s*Vom\s*(\d{2}/\d{2}/\d{2})",
         text,
@@ -363,21 +361,18 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         invoice_number = clean_value(m.group(1))
         date = normalize_date(m.group(2))
 
-    # Fallback, falls spacing im PDF stark abweicht
+    # Fallback
     if not invoice_number:
         m_num = re.search(r"Beleg-Nr\.\s*:\s*(\d+)", text, re.IGNORECASE)
         if m_num:
             invoice_number = clean_value(m_num.group(1))
 
     if not date:
-        m_date = re.search(r"Vom\s*:\s*(\d{2}/\d{2}/\d{2})", text, re.IGNORECASE)
+        m_date = re.search(r"Vom\s*(\d{2}/\d{2}/\d{2})", text, re.IGNORECASE)
         if m_date:
             date = normalize_date(m_date.group(1))
 
-    # Kunde:
-    # 1. Zeile im rechten Adressfeld.
-    # Im Parsed Text kommt sie doppelt hintereinander vor:
-    # "MICHAEL FRITSCH/ FRITTBOARDS MICHAEL FRITSCH/ FRITTBOARDS"
+    # Kunde
     m_customer = re.search(
         r"(MICHAEL\s+FRITSCH/\s*FRITTBOARDS)(?:\s+\1)?",
         text,
@@ -386,7 +381,6 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
     if m_customer:
         customer = "MICHAEL FRITSCH/ FRITTBOARDS"
 
-    # Generischer Fallback für weitere Oxbow-Rechnungen:
     if not customer:
         header_text = text.split("RECHNUNG - ORIGINAL")[0]
         header_lines = [clean_value(x) for x in header_text.splitlines() if clean_value(x)]
@@ -403,6 +397,56 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
             "VAT KRED.",
             "VAT DEB.",
         }
+
+        candidates = []
+        for line in header_lines:
+            upper = line.upper()
+
+            if upper in blocked:
+                continue
+            if "OXBOW" in upper:
+                continue
+            if "VAT" in upper:
+                continue
+            if re.search(r"\d{4,}", line):
+                continue
+            if len(line) < 4:
+                continue
+
+            if "/" in line or "FRITT" in upper or "MICHAEL" in upper:
+                candidates.append(line)
+
+        if candidates:
+            customer = candidates[0]
+
+    # Betrag
+    # erkennt sowohl:
+    # "1 653.92"
+    # als auch "1 6 5 3 . 9 2"
+    amount_patterns = [
+        r"ZU\s+ZAHLEN\s+((?:\d\s*)+\.\s*\d\s*\d)\s*EUR",
+        r"BETRAG\s*o\.\s*MwST\.\s*((?:\d\s*)+\.\s*\d\s*\d)",
+        r"FÄLLIG\s+\d{2}/\d{2}/\d{2}\s+((?:\d\s*)+\.\s*\d\s*\d)",
+    ]
+
+    for pattern in amount_patterns:
+        m_amount = re.search(pattern, text, re.IGNORECASE)
+        if m_amount:
+            raw_amount = m_amount.group(1)
+            # alle Leerzeichen entfernen, damit aus "1 6 5 3 . 9 2" -> "1653.92" wird
+            raw_amount = re.sub(r"\s+", "", raw_amount)
+            amount = normalize_amount(raw_amount)
+            if amount is not None:
+                break
+
+    return {
+        "Kundenname": customer,
+        "Marke": brand,
+        "Rechnungssteller": issuer,
+        "Datum": date,
+        "Rechnungsnummer": invoice_number,
+        "Betrag": amount,
+    }
 
         candidates = []
         for line in header_lines:
