@@ -184,25 +184,34 @@ def parse_french_albion_wholesale(text: str, lines, brand: str, issuer: str) -> 
         date = normalize_date(m.group(1))
 
     # Kunde:
-    # Block direkt nach PAYMENT DATE bis Taxe / B2B... / REF. / Devis n°
-    customer_block_match = re.search(
-        r"PAYMENT DATE\s*:\s*[^\n]+\n(.*?)(?:\nTaxe\s*:|\nB2B[A-Z0-9_]+|\nREF\.|\nDevis n°)",
-        text,
-        re.IGNORECASE | re.DOTALL
-    )
+    # Bei diesen KATIN/French-Albion-Rechnungen ist der Kundenname
+    # die erste Zeile direkt nach PAYMENT DATE
+    for i, line in enumerate(lines):
+        if "PAYMENT DATE" in line.upper():
+            for j in range(i + 1, min(i + 8, len(lines))):
+                candidate = clean_value(lines[j])
 
-    if customer_block_match:
-        customer_block = customer_block_match.group(1).strip()
-        block_lines = [clean_value(x) for x in customer_block.splitlines() if clean_value(x)]
+                if not candidate:
+                    continue
 
-        if block_lines:
-            # erste Zeile im Empfängerblock = Kundenname
-            customer = block_lines[0]
+                # Offensichtliche Nicht-Kunden überspringen
+                low = candidate.lower()
+                if (
+                    "taxe" in low
+                    or "ref." in low
+                    or "devis" in low
+                    or low.startswith("b2b")
+                    or candidate in ["Allemagne", "Autriche", "France"]
+                ):
+                    continue
 
-    # harter Schutz: Rechnungssteller darf nie als Kunde landen
-    if customer:
-        if customer.strip().lower() in ["sas french albion", "french albion"]:
-            customer = ""
+                customer = candidate
+                break
+            break
+
+    # Harter Schutz: Rechnungssteller darf nie als Kunde landen
+    if customer and customer.strip().lower() in ["sas french albion", "french albion"]:
+        customer = ""
 
     # Betrag
     for line in lines:
