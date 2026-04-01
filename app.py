@@ -93,14 +93,14 @@ if uploaded_files:
         hide_index=True,
         column_config={
             "Kundenname": st.column_config.TextColumn("Kundenname"),
-            "Marke": st.column_config.SelectboxColumn(
-                "Marke",
-                options=["", "KATIN", "SUN BUM", "TOPO DESIGNS", "KAOTIKO"]
-            ),
-            "Rechnungssteller": st.column_config.SelectboxColumn(
-                "Rechnungssteller",
-                options=["", "French Albion", "Kaotiko"]
-            ),
+"Marke": st.column_config.SelectboxColumn(
+    "Marke",
+    options=["", "KATIN", "SUN BUM", "TOPO DESIGNS", "KAOTIKO", "OXBOW"]
+),
+"Rechnungssteller": st.column_config.SelectboxColumn(
+    "Rechnungssteller",
+    options=["", "French Albion", "Kaotiko", "Oxbow"]
+),
             "Datum": st.column_config.TextColumn("Datum"),
             "Rechnungsnummer": st.column_config.TextColumn("Rechnungsnummer"),
             "Betrag": st.column_config.NumberColumn(
