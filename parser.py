@@ -425,25 +425,34 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         if candidates:
             customer = candidates[0]
 
-    # Betrag robuster erkennen
-    amount_patterns = [
-        r"ZU\s*ZAHLEN\s*([0-9\s]+\.\d{2})",
-        r"ZU\s*ZAHLEN\s*([0-9\s\.]+,\d{2})",
-        r"BETRAG\s*o\.?\s*MwST\.?\s*([0-9\s]+\.\d{2})",
-        r"BETRAG\s*o\.?\s*MwST\.?\s*([0-9\s\.]+,\d{2})",
-        r"FÄLLIG\s*\d{2}/\d{2}/\d{2}\s*([0-9\s]+\.\d{2})",
-    ]
+    # Betrag:
+    # Nach dem Kompaktmachen wird der Block ungefähr zu:
+    # BETRAGo.MwST.FÄLLIG1653.921653.921653.92EURZUZAHLEN01/06/26
+    # Wir holen daher zuerst den gesamten Zahlblock vor EUR
+    m_block = re.search(
+        r"BETRAGo\.MwST\.FÄLLIG([0-9\.]+)EUR",
+        compact_text,
+        re.IGNORECASE
+    )
+    if m_block:
+        raw_block = m_block.group(1)
+        amounts = re.findall(r"\d+\.\d{2}", raw_block)
+        if amounts:
+            amount = normalize_amount(amounts[0])
 
-    for pattern in amount_patterns:
-        m_amount = re.search(pattern, text, re.IGNORECASE)
+    # Fallback 1: direkter ZUZAHLEN-Treffer im kompakten Text
+    if amount is None:
+        m_amount = re.search(r"ZUZAHLEN([0-9]+\.\d{2})", compact_text, re.IGNORECASE)
         if m_amount:
-            raw = m_amount.group(1)
-            raw = raw.replace(" ", "")
-            if "," in raw:
-                raw = raw.replace(".", "")
-            amount = normalize_amount(raw)
-            if amount is not None:
-                break
+            amount = normalize_amount(m_amount.group(1))
+
+    # Fallback 2: Betrag-Block ohne exakten Präfix
+    if amount is None:
+        tail = compact_text[-800:]
+        amounts = re.findall(r"\d+\.\d{2}", tail)
+        if amounts:
+            # im Endblock ist 1653.92 der relevante Rechnungsbetrag
+            amount = normalize_amount(amounts[-1])
 
     return {
         "Kundenname": customer,
@@ -453,7 +462,6 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         "Rechnungsnummer": invoice_number,
         "Betrag": amount,
     }
-
 
 def parse_generic(text: str, lines, brand: str, issuer: str) -> dict:
     invoice_number = ""
