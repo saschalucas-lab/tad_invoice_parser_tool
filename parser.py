@@ -42,7 +42,6 @@ def normalize_amount(amount):
     value = value.replace("€", "").replace("EUR", "").replace("\xa0", " ")
     value = value.strip()
 
-    # Wenn Komma vorhanden, dann ist es Dezimaltrennzeichen
     if "," in value:
         value = value.replace(" ", "").replace(".", "").replace(",", ".")
     else:
@@ -173,45 +172,59 @@ def parse_french_albion_wholesale(text: str, lines, brand: str, issuer: str) -> 
     customer = ""
     amount = None
 
-    # Rechnungsnummer
     m = re.search(r"N°\s*(F-\d+)", text)
     if m:
         invoice_number = m.group(1)
 
-    # Datum
     m = re.search(r"DATE\s*:\s*(\d{2}-\d{2}-\d{4})", text)
     if m:
         date = normalize_date(m.group(1))
 
     # Kunde:
-    # Bei diesen KATIN/French-Albion-Rechnungen ist der Kundenname
-    # die erste Zeile direkt nach PAYMENT DATE
-    for i, line in enumerate(lines):
-        if "PAYMENT DATE" in line.upper():
-            for j in range(i + 1, min(i + 8, len(lines))):
-                candidate = clean_value(lines[j])
+    # Harte Regel: erste echte Zeile direkt nach PAYMENT DATE
+    raw_lines = text.splitlines()
+
+    for i, raw_line in enumerate(raw_lines):
+        if "PAYMENT DATE" in raw_line.upper():
+            for j in range(i + 1, min(i + 8, len(raw_lines))):
+                candidate = clean_value(raw_lines[j])
 
                 if not candidate:
                     continue
 
-                # Offensichtliche Nicht-Kunden überspringen
                 low = candidate.lower()
+
                 if (
-                    "taxe" in low
-                    or "ref." in low
-                    or "devis" in low
+                    low.startswith("taxe")
                     or low.startswith("b2b")
+                    or low.startswith("ref.")
+                    or low.startswith("devis")
                     or candidate in ["Allemagne", "Autriche", "France"]
                 ):
+                    continue
+
+                if low in ["sas french albion", "french albion"]:
                     continue
 
                 customer = candidate
                 break
             break
 
-    # Harter Schutz: Rechnungssteller darf nie als Kunde landen
-    if customer and customer.strip().lower() in ["sas french albion", "french albion"]:
-        customer = ""
+    # Zusatz-Fallback
+    if not customer:
+        m = re.search(r"PAYMENT DATE\s*:\s*[^\n]+\n([^\n]+)", text, re.IGNORECASE)
+        if m:
+            candidate = clean_value(m.group(1))
+            low = candidate.lower()
+            if (
+                candidate
+                and low not in ["sas french albion", "french albion"]
+                and not low.startswith("taxe")
+                and not low.startswith("b2b")
+                and not low.startswith("ref.")
+                and not low.startswith("devis")
+            ):
+                customer = candidate
 
     # Betrag
     for line in lines:
@@ -282,12 +295,10 @@ def parse_kaotiko(text: str, lines, brand: str, issuer: str) -> dict:
     customer = ""
     amount = None
 
-    # Rechnungsnummer
     m = re.search(r"\bJOOR\s+(\d{6})\s+\d{2}/\d{2}/\d{4}\s+\d+\b", text, re.IGNORECASE)
     if m:
         invoice_number = m.group(1)
 
-    # Datum
     m = re.search(r"Fecha de la operación:\s*(\d{2}/\d{2}/\d{4})", text, re.IGNORECASE)
     if m:
         date = normalize_date(m.group(1))
@@ -311,7 +322,6 @@ def parse_kaotiko(text: str, lines, brand: str, issuer: str) -> dict:
                     customer = candidate
                     break
 
-    # Betrag
     m = re.search(r"T\.Invoice\s*\(€\)\s*:\s*([0-9]+,\d{2})", text, re.IGNORECASE)
     if m:
         amount = normalize_amount(m.group(1))
