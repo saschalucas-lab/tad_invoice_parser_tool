@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+
 import pdfplumber
 
 
@@ -35,11 +36,10 @@ def normalize_amount(amount):
     value = str(amount)
     value = value.replace("€", "").replace("EUR", "").replace("\xa0", " ")
     value = value.strip()
+    value = re.sub(r"\s+", "", value)
 
     if "," in value:
-        value = value.replace(" ", "").replace(".", "").replace(",", ".")
-    else:
-        value = value.replace(" ", "")
+        value = value.replace(".", "").replace(",", ".")
 
     try:
         return float(value)
@@ -270,7 +270,7 @@ def parse_french_albion_samples(text: str, lines, brand: str, issuer: str) -> di
     customer = first_valid_line_after(
         lines,
         lambda line: "N° client" in line or "N° CLIENT" in line,
-        max_offset=5
+        max_offset=5,
     )
 
     for line in lines:
@@ -330,7 +330,7 @@ def parse_kaotiko(text: str, lines, brand: str, issuer: str) -> dict:
         m = re.search(
             r"Líquido\(EUR\)\s*:\s*/\s*T\.Invoice\s*\(€\)\s*:\s*([0-9]+,\d{2})",
             text,
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         if m:
             amount = normalize_amount(m.group(1))
@@ -351,17 +351,15 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
     customer = ""
     amount = None
 
-    # Rechnungsnummer + Datum
     m = re.search(
         r"RECHNUNG\s*-\s*ORIGINAL\s*No\s*(\d+)\s*Vom\s*(\d{2}/\d{2}/\d{2})",
         text,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
     if m:
         invoice_number = clean_value(m.group(1))
         date = normalize_date(m.group(2))
 
-    # Fallback
     if not invoice_number:
         m_num = re.search(r"Beleg-Nr\.\s*:\s*(\d+)", text, re.IGNORECASE)
         if m_num:
@@ -372,11 +370,10 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         if m_date:
             date = normalize_date(m_date.group(1))
 
-    # Kunde
     m_customer = re.search(
         r"(MICHAEL\s+FRITSCH/\s*FRITTBOARDS)(?:\s+\1)?",
         text,
-        re.IGNORECASE
+        re.IGNORECASE,
     )
     if m_customer:
         customer = "MICHAEL FRITSCH/ FRITTBOARDS"
@@ -419,10 +416,6 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         if candidates:
             customer = candidates[0]
 
-    # Betrag
-    # erkennt sowohl:
-    # "1 653.92"
-    # als auch "1 6 5 3 . 9 2"
     amount_patterns = [
         r"ZU\s+ZAHLEN\s+((?:\d\s*)+\.\s*\d\s*\d)\s*EUR",
         r"BETRAG\s*o\.\s*MwST\.\s*((?:\d\s*)+\.\s*\d\s*\d)",
@@ -433,51 +426,10 @@ def parse_oxbow(text: str, lines, brand: str, issuer: str) -> dict:
         m_amount = re.search(pattern, text, re.IGNORECASE)
         if m_amount:
             raw_amount = m_amount.group(1)
-            # alle Leerzeichen entfernen, damit aus "1 6 5 3 . 9 2" -> "1653.92" wird
             raw_amount = re.sub(r"\s+", "", raw_amount)
             amount = normalize_amount(raw_amount)
             if amount is not None:
                 break
-
-    return {
-        "Kundenname": customer,
-        "Marke": brand,
-        "Rechnungssteller": issuer,
-        "Datum": date,
-        "Rechnungsnummer": invoice_number,
-        "Betrag": amount,
-    }
-
-        candidates = []
-        for line in header_lines:
-            upper = line.upper()
-
-            if upper in blocked:
-                continue
-            if "OXBOW" in upper:
-                continue
-            if "VAT" in upper:
-                continue
-            if re.search(r"\d{4,}", line):
-                continue
-            if len(line) < 4:
-                continue
-
-            if "/" in line or "FRITT" in upper or "MICHAEL" in upper:
-                candidates.append(line)
-
-        if candidates:
-            customer = candidates[0]
-
-    # Betrag: bevorzugt ZU ZAHLEN
-    m = re.search(r"ZU\s+ZAHLEN\s+([0-9\s]+\.\d{2})\s*EUR", text, re.IGNORECASE)
-    if m:
-        amount = normalize_amount(m.group(1))
-
-    if amount is None:
-        m = re.search(r"BETRAG\s*o\.\s*MwST\.\s*([0-9\s]+\.\d{2})", text, re.IGNORECASE)
-        if m:
-            amount = normalize_amount(m.group(1))
 
     return {
         "Kundenname": customer,
@@ -570,19 +522,16 @@ def extract_invoice_data(pdf_path: str) -> dict:
     else:
         data = parse_generic(text, lines, brand, issuer)
 
-    # Harter Schutz für French Albion
     if data.get("Rechnungssteller") == "French Albion":
         kundenname = str(data.get("Kundenname", "")).strip().lower()
         if kundenname in ["sas french albion", "french albion"]:
             data["Kundenname"] = ""
 
-    # Harter Schutz für KAOTIKO
     if data.get("Rechnungssteller") == "Kaotiko":
         kundenname = str(data.get("Kundenname", "")).strip()
         if kundenname.upper().startswith("CL/") or re.search(r"\d", kundenname):
             data["Kundenname"] = ""
 
-    # Harter Schutz für Oxbow
     if data.get("Rechnungssteller") == "Oxbow":
         kundenname = str(data.get("Kundenname", "")).strip().lower()
         if kundenname in ["oxbow", "oxbow s.a.s.", "oxbow sas"]:
